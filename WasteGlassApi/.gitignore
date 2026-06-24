@@ -1,0 +1,4 @@
+bin/
+obj/
+firebase-key.json
+appsettings.Development.json
