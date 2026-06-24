@@ -4,19 +4,31 @@ using Google.Cloud.Firestore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Render requires binding to the port it provides
+var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
+builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+
 // ---- Firebase setup ----
 string projectId = "waste-glass-app";
-string keyPath = Path.Combine(AppContext.BaseDirectory, "firebase-key.json");
+
+// Try environment variable first (used on Render), fall back to local file (used on your own laptop)
+string? credentialsJson = Environment.GetEnvironmentVariable("FIREBASE_CREDENTIALS_JSON");
+
+if (string.IsNullOrEmpty(credentialsJson))
+{
+    string keyPath = Path.Combine(AppContext.BaseDirectory, "firebase-key.json");
+    credentialsJson = File.ReadAllText(keyPath);
+}
 
 FirebaseApp.Create(new AppOptions()
 {
-    Credential = GoogleCredential.FromFile(keyPath)
+    Credential = GoogleCredential.FromJson(credentialsJson)
 });
 
 FirestoreDb db = new FirestoreDbBuilder
 {
     ProjectId = projectId,
-    JsonCredentials = File.ReadAllText(keyPath)
+    JsonCredentials = credentialsJson
 }.Build();
 
 var app = builder.Build();
@@ -64,7 +76,6 @@ app.MapGet("/api/route", async () =>
 {
     var snapshot = await db.Collection("suppliers").GetSnapshotAsync();
 
-    // Only include suppliers not yet Collected
     var remaining = new List<Dictionary<string, object>>();
     foreach (var doc in snapshot.Documents)
     {
@@ -87,7 +98,6 @@ app.MapGet("/api/route", async () =>
 
     while (remaining.Count > 0)
     {
-        // Dijkstra step: find nearest unvisited supplier from current position
         double minDist = double.MaxValue;
         Dictionary<string, object>? nearest = null;
 
@@ -137,7 +147,6 @@ app.MapGet("/api/route", async () =>
 // ---- Submit a collection (after barcode scan + quantity entry) ----
 app.MapPost("/api/collect", async (CollectRequest request) =>
 {
-    // Find the supplier document matching this barcodeId
     var snapshot = await db.Collection("suppliers")
         .WhereEqualTo("barcodeId", request.BarcodeId)
         .GetSnapshotAsync();
@@ -206,7 +215,6 @@ app.MapGet("/api/trip-summary", async () =>
         });
     }
 
-    // Recalculate total distance using the same route logic, ignoring status this time
     var allSuppliers = new List<Dictionary<string, object>>();
     foreach (var doc in snapshot.Documents)
     {
@@ -251,7 +259,7 @@ app.MapGet("/api/trip-summary", async () =>
     {
         totalKgCollected = Math.Round(totalKg, 2),
         totalDistanceKm = Math.Round(totalDistance, 2),
-        tripDurationMinutes = 90, // placeholder — Flutter can send real elapsed time later if needed
+        tripDurationMinutes = 90,
         suppliers = summaryList
     });
 });
